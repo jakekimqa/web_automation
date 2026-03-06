@@ -47,6 +47,8 @@ function buildServiceRegex(serviceName) {
 test.describe('QA-ZERO B2B 예약 등록 확인', () => {
   test('로그인 > 마이페이지 > 샵 진입 > 리스트 전환 > 예약건 매칭 확인', async ({ page }) => {
     test.setTimeout(180000);
+    const finalScreenshotPath =
+      process.env.B2B_BOOKING_VERIFY_FINAL_SCREENSHOT_PATH || 'test-results/b2b-booking-verify-final-screen.png';
 
     const b2bId = process.env.B2B_ID || 'herrenail';
     const b2bPassword = process.env.B2B_PASSWORD || 'gong2023@@';
@@ -188,5 +190,58 @@ test.describe('QA-ZERO B2B 예약 등록 확인', () => {
       bookingPattern.test(boardText),
       `타겟 예약건 매칭 실패: 날짜오프셋=${BOOKING_DATE_OFFSET_DAYS}, 패턴=${bookingPattern}, 본문=${boardText}`
     ).toBeTruthy();
+
+    // 예약 리스트에서 타겟 예약 클릭 -> [예약 상세 정보] 진입 강제 검증
+    const bookingRowPattern = new RegExp(
+      `${timePart}.*?${customerPart}.*?${servicePart}|${customerPart}.*?${timePart}.*?${servicePart}`,
+      'i'
+    );
+    const bookingRow = scheduleRoot
+      .locator('.fc-list-event, .fc-event, [class*="booking"], [class*="event"], tr, li')
+      .filter({ hasText: bookingRowPattern })
+      .first();
+    await expect(bookingRow).toBeVisible({ timeout: 30000 });
+    await bookingRow.click({ force: true }).catch(async () => {
+      await bookingRow.evaluate((el) => el.click()).catch(() => {});
+    });
+    await page.waitForLoadState('networkidle').catch(() => {});
+    await page.waitForTimeout(400);
+
+    const detailHeading = page.getByText(/예약 상세 정보/).first();
+    await expect(detailHeading).toBeVisible({ timeout: 30000 });
+
+    const detailRoot = page
+      .locator('section, aside, div')
+      .filter({ has: detailHeading })
+      .or(
+        page
+          .locator('section, aside, div')
+          .filter({ hasText: /예약 상세 정보/i })
+          .filter({ hasText: /예약일시|예약 일시/i })
+          .filter({ hasText: /담당자/i })
+          .filter({ hasText: /시술메뉴|시술 메뉴/i })
+      )
+      .first();
+    await expect(detailRoot).toBeVisible({ timeout: 30000 });
+
+    const detailText = (await detailRoot.innerText()).replace(/\s+/g, ' ').trim();
+    const detailDateTimeRegex = new RegExp(`${datePart}.*?${timePart}|${timePart}.*?${datePart}`, 'i');
+    const detailStaffRegex = new RegExp(`(담당자\\s*)?${staffPart}`, 'i');
+    const detailServiceRegex = serviceRegex;
+
+    expect(
+      detailDateTimeRegex.test(detailText),
+      `상세 예약일시 매칭 실패: 패턴=${detailDateTimeRegex}, 본문=${detailText}`
+    ).toBeTruthy();
+    expect(
+      detailStaffRegex.test(detailText),
+      `상세 담당자 매칭 실패: 패턴=${detailStaffRegex}, 본문=${detailText}`
+    ).toBeTruthy();
+    expect(
+      detailServiceRegex.test(detailText),
+      `상세 시술메뉴 매칭 실패: 패턴=${detailServiceRegex}, 본문=${detailText}`
+    ).toBeTruthy();
+
+    await page.screenshot({ path: finalScreenshotPath, fullPage: true });
   });
 });
